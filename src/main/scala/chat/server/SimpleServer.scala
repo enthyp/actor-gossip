@@ -1,8 +1,7 @@
 package chat.server
 
-import java.io.File
-
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
+import chat._
 import com.typesafe.config.ConfigFactory
 
 object SimpleServer {
@@ -10,18 +9,24 @@ object SimpleServer {
 }
 
 class SimpleServer extends Actor with ActorLogging {
-  import chat.client.SimpleClient._
-
-  override def preStart(): Unit = {
-    log.info("Started server actor")
-    log.info(akka.serialization.Serialization.serializedActorPath(self))
-  }
-
-  override def postStop(): Unit = log.info("Stopped server actor")
+  override def preStart(): Unit = log.info("Starting server.")
+  override def postStop(): Unit = log.info("Server stopped.")
 
   override def receive: Receive = {
-    case TextLineMsg(line) =>
-      println(s"Received: $line")
+    case Login(user) =>
+      println(s"login $user")
+    case Logout(user) =>
+      println(s"logout $user")
+    case GetChatRooms =>
+      println("get chat rooms")
+    case Join(user, room) =>
+      println(s"join $room by $user")
+    case Leave(user) =>
+      println(s"leave by $user")
+    case ChatMessage(from, msg) =>
+      println(s"message $msg from $from")
+    case other =>
+      log.error(s"Unexpected message: $other")
   }
 }
 
