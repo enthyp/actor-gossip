@@ -2,8 +2,8 @@ package chat.client
 
 import util.control.Breaks._
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSelection, ActorSystem, FSM, PoisonPill, Props}
-import chat._
-import chat.client.SimpleClient.{Data, LeaveCmd, State}
+import chat.{LeftRoom, _}
+import chat.client.SimpleClient.{Data, State}
 import com.typesafe.config.ConfigFactory
 
 
@@ -19,6 +19,7 @@ object SimpleClient {
   final case class JoinCmd(room: String) extends Command
   final case object GetRoomsCmd extends Command
   final case object LeaveCmd extends Command
+  final case object LogoutCmd extends Command
   final case object UnknownCmd extends Command
 
   final case class ParsingError(private val message: String = "",
@@ -59,6 +60,7 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
       stay using Uninitialized
 
     case Event(LoggedIn(nick, remoteActor), Uninitialized) =>
+      println("Logged in successfully.")
       goto(Connected) using SessionData(nick, remoteActor)
 
     case Event(NameTaken(nick: String), Uninitialized) =>
@@ -68,9 +70,10 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
 
   when(Connected) {
     case Event(Joined(room), SessionData(nick, remoteRef)) =>
+      println("Joined room!")
       goto(Chatting) using ConvData(nick, room, remoteRef)
 
-    case Event(ChatRooms(rooms: List[String]), data: SessionData) =>
+    case Event(RespondChatRooms(rooms: List[String]), data: SessionData) =>
       println("CHAT ROOMS:")
       rooms.foreach(r => println(s"-> $r"))
       stay using data
@@ -82,42 +85,51 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
             cmd match {
               case JoinCmd(room) =>
                 remoteRef ! Join(nick, room)
+                stay
               case GetRoomsCmd =>
-                remoteRef ! GetChatRooms
+                remoteRef ! RequestChatRooms
+                stay
+              case LogoutCmd =>
+                remoteRef ! RequestLogout
+                goto(Connecting) using Uninitialized
               case UnknownCmd =>
                 println(s"Unknown command: $cmd")
+                stay
               case _ =>
                 println(s"Command $cmd is not supported in this state.")
+                stay
             }
           case Right(_) =>
             println("Only commands are supported in this state.")
+            stay
         }
       } catch {
-        case ParsingError(message, _) => println(s"Parsing error occurred: $message")
+        case ParsingError(message, _) =>
+          println(s"Parsing error occurred: $message")
+          stay
       }
 
-      stay
   }
 
   when(Chatting) {
-    case Event(ChatMessage(from, msg), data: SessionData) =>
+    case Event(ChatMessage(from, msg), _: ConvData) =>
       println(s">>> $from: $msg")
-      stay using data
+      stay
 
-    case Event(ChatLog(log), data: SessionData) =>
+    case Event(ChatLog(log), _: ConvData) =>
       log.map({case ChatMessage(from, msg) => s">>> $from: $msg"}).foreach(println)
-      stay using data
+      stay
 
-    case Event(Left(room), data: ConvData) =>
+    case Event(LeftRoom, ConvData(nick, room, remoteRef)) =>
       println(s"Left $room")
-      goto(Connected) using SessionData(data.nick, data.remoteRef)
+      goto(Connected) using SessionData(nick, remoteRef)
 
-    case Event(InputLineMsg(line), SessionData(nick, remoteRef)) =>
+    case Event(InputLineMsg(line), ConvData(nick, _, remoteRef)) =>
       try {
         parseLine(line) match {
           case Left(cmd) =>
             cmd match {
-              case LeaveCmd => remoteRef ! Leave(nick)
+              case LeaveCmd => remoteRef ! Leave
               case UnknownCmd => println(s"Unknown command: $cmd")
               case _ => println(s"Command $cmd is not supported in this state.")
             }
@@ -172,16 +184,23 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
           throw ParsingError(message = "Command: \\leave takes no parameters.")
         else
           LeaveCmd
+      case "logout" =>
+        if (rem.isDefined)
+          throw ParsingError(message = "Command: \\logout takes no parameters.")
+        else
+          LogoutCmd
       case _ =>
         UnknownCmd
     }
   }
+
+  initialize()
 }
 
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val portConfig = ConfigFactory.load("client")
+    val portConfig = ConfigFactory.load("client1")
     val system = ActorSystem("chat-client-system", portConfig)
 
     val serverActorRef =
