@@ -35,8 +35,8 @@ object SimpleClient {
   // client data
   sealed trait Data
   case object Uninitialized extends Data
-  case class ConnectionData(nick: String) extends Data
   case class SessionData(nick: String, remoteRef: ActorRef) extends Data
+  case class ConvData(nick: String, room: String, remoteRef: ActorRef) extends Data
 }
 
 class SimpleClient(serverActorRef: ActorSelection) extends Actor
@@ -58,8 +58,8 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
         println("Nickname can contain letters only!")
       stay using Uninitialized
 
-    case Event(LoggedIn(nick: String), Uninitialized) =>
-      goto(Connected) using ConnectionData(nick)
+    case Event(LoggedIn(nick, remoteActor), Uninitialized) =>
+      goto(Connected) using SessionData(nick, remoteActor)
 
     case Event(NameTaken(nick: String), Uninitialized) =>
       println(s"$nick is taken, choose another one!")
@@ -67,23 +67,23 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
   }
 
   when(Connected) {
-    case Event(Joined(remoteActorRef), ConnectionData(nick)) =>
-      goto(Chatting) using SessionData(nick, remoteActorRef)
+    case Event(Joined(room), SessionData(nick, remoteRef)) =>
+      goto(Chatting) using ConvData(nick, room, remoteRef)
 
-    case Event(ChatRooms(rooms: List[String]), data: ConnectionData) =>
+    case Event(ChatRooms(rooms: List[String]), data: SessionData) =>
       println("CHAT ROOMS:")
       rooms.foreach(r => println(s"-> $r"))
       stay using data
 
-    case Event(InputLineMsg(line), ConnectionData(nick)) =>
+    case Event(InputLineMsg(line), SessionData(nick, remoteRef)) =>
       try {
         parseLine(line) match {
           case Left(cmd) =>
             cmd match {
               case JoinCmd(room) =>
-                serverActorRef ! Join(nick, room)
+                remoteRef ! Join(nick, room)
               case GetRoomsCmd =>
-                serverActorRef ! GetChatRooms
+                remoteRef ! GetChatRooms
               case UnknownCmd =>
                 println(s"Unknown command: $cmd")
               case _ =>
@@ -108,16 +108,16 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
       log.map({case ChatMessage(from, msg) => s">>> $from: $msg"}).foreach(println)
       stay using data
 
-    case Event(Left(room), data: SessionData) =>
+    case Event(Left(room), data: ConvData) =>
       println(s"Left $room")
-      goto(Connected) using ConnectionData(data.nick)
+      goto(Connected) using SessionData(data.nick, data.remoteRef)
 
     case Event(InputLineMsg(line), SessionData(nick, remoteRef)) =>
       try {
         parseLine(line) match {
           case Left(cmd) =>
             cmd match {
-              case LeaveCmd => Leave(nick)
+              case LeaveCmd => remoteRef ! Leave(nick)
               case UnknownCmd => println(s"Unknown command: $cmd")
               case _ => println(s"Command $cmd is not supported in this state.")
             }
