@@ -1,6 +1,8 @@
 package chat.server
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.cluster.pubsub.DistributedPubSub
+import akka.cluster.pubsub.DistributedPubSubMediator.{Publish, Subscribe}
 import chat.ChatMessage
 
 import scala.collection.mutable
@@ -15,16 +17,25 @@ object Room {
 }
 
 class Room(name: String) extends Actor with ActorLogging {
+  val mediator = DistributedPubSub(context.system).mediator
+  val topic = name
+  mediator ! Subscribe(topic, self)
+  println(s"$name room subscriber up and running!")
+
   private val users = mutable.HashMap[String, ActorRef]()
 
-  import Room._
-
   override def receive: Receive = {
-    case Subscribe(user, ref) =>
+    case Room.Subscribe(user, ref) =>
       users += (user -> ref)
-    case Unsubscribe(user) =>
+
+    case Room.Unsubscribe(user) =>
       users -= user
-    case Publish(user, msg) =>
-      (users - user).foreach { case (u, ref) => ref ! msg }
+
+    case Room.Publish(user, msg: ChatMessage) =>
+      (users - user).foreach { case (_, ref) => ref ! msg }
+      mediator ! Publish(topic, msg)
+
+    case msg @ ChatMessage(from, _) =>
+      (users - from).foreach { case (_, ref) => ref ! msg }
   }
 }

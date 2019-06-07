@@ -200,8 +200,12 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val portConfig = ConfigFactory.load("client")
-    val system = ActorSystem("chat-client-system", portConfig)
+    val config = ConfigFactory.load("client")
+    val system = ActorSystem("chat-client-system",
+      config
+        .getConfig("client1")
+        .withFallback(config)
+    )
 
     val serverActorRef =
       system.actorSelection("akka.tcp://chat-server-system@127.0.0.1:2551/user/server")

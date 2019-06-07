@@ -68,8 +68,13 @@ class Server extends Actor with ActorLogging {
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val portConfig = ConfigFactory.load("server")
-    val system = ActorSystem("chat-server-system", portConfig)
+    val serverConfig = ConfigFactory.load("server")
+
+    val system = ActorSystem("chat-server-system",
+      serverConfig
+      .getConfig("server1")
+      .withFallback(serverConfig)
+    )
 
     val serverActorRef = system.actorOf(Server.props(), "server")
   }
