@@ -254,7 +254,7 @@ object Main {
 
     val config = ConfigFactory.parseString(
       s"""
-         |akka.remote.netty.tcp.host=$clientHost
+         |akka.remote.netty.tcp.hostname="$clientHost"
          |akka.remote.netty.tcp.port=$clientPort
        """.stripMargin)
       .withFallback(ConfigFactory.load("client"))

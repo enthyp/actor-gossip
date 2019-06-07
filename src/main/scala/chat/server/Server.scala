@@ -122,7 +122,7 @@ object Main {
 
     val serverConfig = ConfigFactory.parseString(
       s"""
-         |akka.remote.netty.tcp.host=$serverHost
+         |akka.remote.netty.tcp.hostname="$serverHost"
          |akka.remote.netty.tcp.port=$serverPort
          |akka.cluster.seed-nodes=["akka.tcp://chat-server-system@${seedHost}:${seedPort}"]
        """.stripMargin)
