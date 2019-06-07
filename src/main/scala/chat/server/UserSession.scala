@@ -77,9 +77,9 @@ class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) 
       goto(Connected) using ConnectionData
 
     case Event(msg @ ChatMessage(from, _), ConvData(room)) =>
-      if (from != nick) {
+      if (sender() == room) {
         client ! msg
-      } else {
+      } else if (sender() == client) {
         room ! Publish(nick, msg)
       }
 

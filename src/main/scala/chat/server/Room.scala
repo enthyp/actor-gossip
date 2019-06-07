@@ -24,6 +24,8 @@ class Room(name: String) extends Actor with ActorLogging {
 
   private val users = mutable.HashMap[String, ActorRef]()
 
+
+
   override def receive: Receive = {
     case Room.Subscribe(user, ref) =>
       users += (user -> ref)
@@ -32,10 +34,10 @@ class Room(name: String) extends Actor with ActorLogging {
       users -= user
 
     case Room.Publish(user, msg: ChatMessage) =>
-      (users - user).foreach { case (_, ref) => ref ! msg }
+      //(users - user).foreach { case (_, ref) => ref ! msg }
       mediator ! Publish(topic, msg)
 
     case msg @ ChatMessage(from, _) =>
-      (users - from).foreach { case (_, ref) => ref ! msg }
+      (users).foreach { case (_, ref) => ref ! msg }
   }
 }

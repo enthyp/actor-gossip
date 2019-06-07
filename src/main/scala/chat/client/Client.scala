@@ -3,13 +3,13 @@ package chat.client
 import util.control.Breaks._
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSelection, ActorSystem, FSM, PoisonPill, Props}
 import chat.{LeftRoom, _}
-import chat.client.SimpleClient.{Data, State}
+import chat.client.Client.{Data, State}
 import com.typesafe.config.ConfigFactory
 
 
-object SimpleClient {
+object Client {
   def props(serverActorRef: ActorSelection): Props =
-    Props(new SimpleClient(serverActorRef))
+    Props(new Client(serverActorRef))
 
   // client internals
   sealed trait ClientMessage
@@ -40,10 +40,10 @@ object SimpleClient {
   case class ConvData(nick: String, room: String, remoteRef: ActorRef) extends Data
 }
 
-class SimpleClient(serverActorRef: ActorSelection) extends Actor
+class Client(serverActorRef: ActorSelection) extends Actor
   with ActorLogging
   with FSM[State, Data] {
-  import SimpleClient._
+  import Client._
 
   override def preStart(): Unit = log.info("Client starting.")
   override def postStop(): Unit = log.info("Client stopped.")
@@ -200,19 +200,73 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val config = ConfigFactory.load("client")
-    val system = ActorSystem("chat-client-system",
-      config
-        .getConfig("client1")
-        .withFallback(config)
-    )
+
+    val usage =
+      """
+        | usage: run [-ch client_host] [-cp client_port] [-sh server_host] [-sp server_port]
+        | By default client is run on 127.0.0.1:2553, targeting local server
+        | on 127.0.0.1:2551
+      """.stripMargin
+
+    var clientHost = "127.0.0.1"
+    var clientPort = 2553
+    var serverHost = clientHost
+    var serverPort = 2551
+
+    if (args.length > 0) {
+      val argsList = args.toList
+
+      def parseOptions(args: List[String]): Unit = {
+        args match {
+          case Nil =>
+          case "-ch" :: host :: tail =>
+            clientHost = host
+            parseOptions(tail)
+          case "-cp" :: port :: tail =>
+            clientPort = port.toInt
+            parseOptions(tail)
+          case "-sh" :: host :: tail =>
+            serverHost = host
+            parseOptions(tail)
+          case "-sp" :: port :: tail =>
+            serverPort = port.toInt
+            parseOptions(tail)
+          case opt =>
+            println(s"Unknown option: $opt")
+            println(usage)
+            System.exit(1)
+        }
+      }
+
+      try {
+        parseOptions(argsList)
+      } catch {
+        case _: NumberFormatException =>
+          println("Port numbers must be integers.")
+          println(usage)
+          System.exit(1)
+        case e: Throwable =>
+          println(s"Error occurred: $e")
+          println(usage)
+          System.exit(1)
+      }
+    }
+
+    val config = ConfigFactory.parseString(
+      s"""
+         |akka.remote.netty.tcp.host=$clientHost
+         |akka.remote.netty.tcp.port=$clientPort
+       """.stripMargin)
+      .withFallback(ConfigFactory.load("client"))
+
+    val system = ActorSystem("chat-client-system", config)
 
     val serverActorRef =
-      system.actorSelection("akka.tcp://chat-server-system@127.0.0.1:2551/user/server")
+      system.actorSelection(s"akka.tcp://chat-server-system@$serverHost:$serverPort/user/server")
 
-    val clientActorRef = system.actorOf(SimpleClient.props(serverActorRef), "client")
+    val clientActorRef = system.actorOf(Client.props(serverActorRef), "client")
 
-    import SimpleClient._
+    import Client._
     breakable {
       for (line <- scala.io.Source.stdin.getLines()) {
         line match {
