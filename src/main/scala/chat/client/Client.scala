@@ -200,7 +200,7 @@ class SimpleClient(serverActorRef: ActorSelection) extends Actor
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val portConfig = ConfigFactory.load("client1")
+    val portConfig = ConfigFactory.load("client")
     val system = ActorSystem("chat-client-system", portConfig)
 
     val serverActorRef =
