@@ -3,11 +3,13 @@ package chat.client
 object Parser {
 
   sealed trait Command
+  final case class CreateRoomCmd(room: String) extends Command
+  final case class DeleteRoomCmd(room: String) extends Command
   final case class JoinCmd(room: String) extends Command
   final case object GetRoomsCmd extends Command
   final case object LeaveCmd extends Command
   final case object LogoutCmd extends Command
-  final case object UnknownCmd extends Command
+  final case class UnknownCmd(command: String) extends Command
 
   final case class ParsingError(private val message: String = "",
                                 private val cause: Throwable = None.orNull)
@@ -39,6 +41,18 @@ object Parser {
           throw ParsingError(message = "Command: \\rooms takes no parameters.")
         else
           GetRoomsCmd
+      case "create" =>
+        if (rem.isEmpty || rem.get.split(" ").length > 1)
+          throw ParsingError(message = "Command: \\create takes exactly one parameter.")
+        else if (!rem.get.forall(_.isLetter))
+          throw ParsingError(message = "Room name can contain letters only!")
+        else
+          CreateRoomCmd(rem.get)
+      case "delete" =>
+        if (rem.isEmpty || rem.get.split(" ").length > 1)
+          throw ParsingError(message = "Command: \\delete takes exactly one parameter.")
+        else
+          DeleteRoomCmd(rem.get)
       case "join" =>
         if (rem.isEmpty || rem.get.split(" ").length > 1)
           throw ParsingError(message = "Command: \\join takes exactly one parameter.")
@@ -54,8 +68,8 @@ object Parser {
           throw ParsingError(message = "Command: \\logout takes no parameters.")
         else
           LogoutCmd
-      case _ =>
-        UnknownCmd
+      case other =>
+        UnknownCmd(other)
     }
   }
 }

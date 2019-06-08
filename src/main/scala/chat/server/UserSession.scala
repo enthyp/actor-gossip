@@ -66,6 +66,16 @@ class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) 
       log.info(s"No room $room received.")
       client ! chat.ResponseNoRoom(room)
       stay
+
+    case Event(chat.RequestCreateRoom(room), ConnectionData) =>
+      log.info(s"Request to create room $room received.")
+      server ! Server.RequestCreateRoom(nick, room)
+      stay
+
+    case Event(chat.RequestDeleteRoom(room), ConnectionData) =>
+      log.info(s"Request to delete room $room received.")
+      server ! Server.RequestDeleteRoom(nick, room)
+      stay
   }
 
   onTransition {

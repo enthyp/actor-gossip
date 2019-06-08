@@ -23,6 +23,14 @@ object Server {
   case class RequestJoin(user: String, room: String) extends ServerMessage
   case class ResponseJoined(room: String, roomRef: ActorRef) extends ServerMessage
   case class ResponseNoRoom(room: String) extends ServerMessage
+
+  case class RequestCreateRoom(user: String, room: String) extends ServerMessage
+  case class ResponseRoomCreated(room: String) extends ServerMessage
+  case class ResponseRoomExists(room: String) extends ServerMessage
+
+  case class RequestDeleteRoom(user: String, room: String) extends ServerMessage
+  case class ResponseRoomDeleted(room: String) extends ServerMessage
+  case class ResponseNoPerm(room: String) extends ServerMessage
 }
 
 class Server extends Actor with ActorLogging {

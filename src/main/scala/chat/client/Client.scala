@@ -1,6 +1,7 @@
 package chat.client
 
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSelection, FSM, PoisonPill, Props}
+import chat.RequestCreateRoom
 import chat.client.Client.{Data, State}
 
 
@@ -71,6 +72,12 @@ class Client(serverActorRef: ActorSelection) extends Actor
         parseLine(line) match {
           case Left(cmd) =>
             cmd match {
+              case CreateRoomCmd(room) =>
+                remoteRef ! chat.RequestCreateRoom(room)
+                stay
+              case DeleteRoomCmd(room) =>
+                remoteRef ! chat.RequestDeleteRoom(room)
+                stay
               case JoinCmd(room) =>
                 remoteRef ! chat.RequestJoin(room)
                 stay
@@ -80,8 +87,8 @@ class Client(serverActorRef: ActorSelection) extends Actor
               case LogoutCmd =>
                 serverActorRef ! chat.Logout(nick)
                 goto(Connecting) using Uninitialized
-              case UnknownCmd =>
-                println(s"Unknown command: $cmd")
+              case UnknownCmd(command) =>
+                println(s"Unknown command: $command")
                 stay
               case _ =>
                 println(s"Command $cmd is not supported in this state.")
@@ -108,6 +115,14 @@ class Client(serverActorRef: ActorSelection) extends Actor
     case Event(chat.ResponseChatRooms(rooms: List[String]), _: SessionData) =>
       println("CHAT ROOMS:")
       rooms.foreach(r => println(s"-> $r"))
+      stay
+
+    case Event(chat.ResponseRoomCreated(room: String), _: SessionData) =>
+      println(s"Chat room $room created!")
+      stay
+
+    case Event(chat.ResponseRoomDeleted(room: String), _: SessionData) =>
+      println(s"Chat room $room deleted!")
       stay
   }
 

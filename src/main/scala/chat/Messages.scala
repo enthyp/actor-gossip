@@ -18,6 +18,13 @@ case class Logout(user: String) extends Message
 case object RequestChatRooms extends Message
 case class ResponseChatRooms(rooms: List[String]) extends Message
 
+// TODO: add these!
+case class RequestCreateRoom(name: String) extends Message
+case class ResponseRoomCreated(name: String) extends Message
+
+case class RequestDeleteRoom(name: String) extends Message
+case class ResponseRoomDeleted(name: String) extends Message
+
 case class RequestJoin(room: String) extends Message
 case class ResponseJoined(room: String) extends Message
 case class ResponseNoRoom(room: String) extends Message
