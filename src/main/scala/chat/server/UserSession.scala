@@ -2,14 +2,11 @@ package chat.server
 
 import akka.actor.{Actor, ActorLogging, ActorRef, FSM, Props}
 import akka.util.Timeout
-import chat._
+import akka.pattern.ask
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
-import akka.pattern.ask
-import chat.server.Room.{Publish, Unsubscribe}
-import chat.server.Server.{ChatRooms, GetChatRooms, Logout}
 import chat.server.UserSession.{Data, State}
 
 
@@ -25,70 +22,84 @@ object UserSession {
   // session data
   sealed trait Data
   case object ConnectionData extends Data
-  case class ConvData(room: ActorRef) extends Data
+  case class ConvData(room: String, roomRef: ActorRef) extends Data
 }
 
 class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) extends Actor
   with ActorLogging
   with FSM[State, Data] {
+
   import UserSession._
 
-  implicit val timeout = Timeout(1 seconds)
+  implicit val timeout = Timeout(3 seconds)
+
   import scala.concurrent.ExecutionContext.Implicits.global
 
   startWith(Connected, ConnectionData)
 
   when(Connected) {
-    case Event(RequestChatRooms, ConnectionData) =>
-      log.info(s"Request for chat rooms received.")
-      val rooms: Future[ChatRooms] = (server ? GetChatRooms).mapTo[ChatRooms]
-
-      rooms.onComplete {
-        case Success(msg: ChatRooms) =>
-          client ! RespondChatRooms(msg.rooms)
-        case Failure(e) =>
-          e.printStackTrace()
-          client ! RespondChatRooms(List())
-      }
-
-      stay
-
-    case Event(chat.Join(user, room), ConnectionData) =>
-      log.info(s"Join received.")
-      server ! Server.Join(user, room)
-      stay
-
-    case Event(Server.Joined(room, roomRef), ConnectionData) =>
-      log.info(s"Joined received.")
-      client ! chat.Joined(room)
-      goto(Chatting) using ConvData(roomRef)
-
-    case Event(RequestLogout, ConnectionData) =>
-      log.info(s"Logout received.")
-      server ! Logout(nick)
+    case Event(Server.ShutdownSession, ConnectionData) =>
+      log.info(s"Shutdown ordered.")
       stop()
-  }
 
-  when(Chatting) {
-    case Event(Leave, ConvData(room)) =>
-      log.info(s"Leave received.")
-      room ! Unsubscribe(nick)
-      client ! LeftRoom
-      goto(Connected) using ConnectionData
+    case Event(chat.RequestChatRooms, ConnectionData) =>
+      log.info(s"Request for chat rooms received.")
+      server ! Server.RequestChatRooms
+      stay
 
-    case Event(msg @ ChatMessage(from, _), ConvData(room)) =>
-      if (sender() == room) {
-        client ! msg
-      } else if (sender() == client) {
-        room ! Publish(nick, msg)
-      }
+    case Event(chat.ResponseChatRooms(roomsList), ConnectionData) =>
+      log.info(s"Chat rooms response received.")
+      client ! chat.ResponseChatRooms(roomsList)
+      stay
 
+    case Event(chat.RequestJoin(room), ConnectionData) =>
+      log.info(s"Join $room received.")
+      server ! Server.RequestJoin(nick, room)
+      stay
+
+    case Event(Room.ResponseJoined(room), ConnectionData) =>
+      log.info(s"Joined $room received.")
+      client ! chat.ResponseJoined(room)
+      goto(Chatting) using ConvData(room, sender())
+
+    case Event(Server.ResponseNoRoom(room), ConnectionData) =>
+      log.info(s"No room $room received.")
+      client ! chat.ResponseNoRoom(room)
       stay
   }
 
   onTransition {
     case Connected -> Chatting =>
-      // TODO: get chat log from Room
+      nextStateData match {
+        case ConvData(_, roomRef) =>
+          roomRef ! Room.RequestChatHistory
+      }
+  }
+
+  when(Chatting) {
+    case Event(Server.ShutdownSession, ConvData(_, roomRef)) =>
+      log.info(s"Shutdown ordered.")
+      roomRef ! Room.Unsubscribe(nick)
+      stop()
+
+    case Event(chat.RequestLeave, ConvData(room, roomRef)) =>
+      log.info(s"Leave room $room received.")
+      roomRef ! Room.Unsubscribe(nick)
+      client ! chat.ResponseLeft(room)
+      goto(Connected) using ConnectionData
+
+    case Event(Room.ResponseChatHistory(history), _) =>
+      client ! chat.ResponseChatHistory(history)
+      stay
+
+    case Event(msg@chat.ChatMessage(_, _), ConvData(_, roomRef)) =>
+      if (sender() == roomRef) {
+        client ! msg
+      } else if (sender() == client) {
+        roomRef ! Room.Publish(msg)
+      }
+
+      stay
   }
 
   whenUnhandled {

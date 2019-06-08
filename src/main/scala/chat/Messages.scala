@@ -1,6 +1,7 @@
 package chat
 
 import akka.actor.ActorRef
+import chat.server.Room
 
 /*
 * Client-server communication protocol.
@@ -8,18 +9,22 @@ import akka.actor.ActorRef
 
 sealed trait Message
 
-case class Login(user: String) extends Message
-case class LoggedIn(user: String, remoteActor: ActorRef) extends Message
-case class NameTaken(user: String) extends Message
+case class RequestLogin(user: String) extends Message
+case class ResponseLoggedIn(user: String, remoteActor: ActorRef) extends Message
+case class ResponseNameTaken(user: String) extends Message
 
-case object RequestLogout extends Message
+case class Logout(user: String) extends Message
 
 case object RequestChatRooms extends Message
-case class RespondChatRooms(rooms: List[String]) extends Message
+case class ResponseChatRooms(rooms: List[String]) extends Message
 
-case class Join(user: String, room: String) extends Message
-case class Joined(room: String) extends Message
-case class ChatLog(log: List[ChatMessage]) extends Message
-case class ChatMessage(from: String, msg: String) extends Message
-case object Leave extends Message
-case object LeftRoom extends Message
+case class RequestJoin(room: String) extends Message
+case class ResponseJoined(room: String) extends Message
+case class ResponseNoRoom(room: String) extends Message
+
+case object RequestChatHistory extends Message
+case class ResponseChatHistory(history: List[ChatMessage]) extends Message
+
+case class ChatMessage(from: String, msg: String) extends Message with Room.PublishableMessage
+case object RequestLeave extends Message
+case class ResponseLeft(room: String) extends Message
