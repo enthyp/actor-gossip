@@ -142,8 +142,16 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
       uiActorRef ! UIActor.ResponseError("Info", s"Chat room $room created!")
       stay
 
+    case Event(chat.ResponseRoomExists(room), _: SessionData) =>
+      uiActorRef ! UIActor.ResponseError("Info", s"Room: $room exists already!")
+      stay
+
     case Event(chat.ResponseRoomDeleted(room: String), _: SessionData) =>
       uiActorRef ! UIActor.ResponseError("Info", s"Chat room $room deleted!")
+      stay
+
+    case Event(chat.ResponseNoPerm(room: String), _: SessionData) =>
+      uiActorRef ! UIActor.ResponseError("Error", s"You have no permission to delete $room!")
       stay
   }
 

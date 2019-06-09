@@ -53,7 +53,7 @@ class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) 
       goto(Chatting) using ConvData(room, sender())
 
     case Event(Server.ResponseNoRoom(room), ConnectionData) =>
-      log.info(s"No room $room received.")
+      log.info(s"No room: $room received.")
       client ! chat.ResponseNoRoom(room)
       stay
 
@@ -62,9 +62,29 @@ class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) 
       server ! Server.RequestCreateRoom(nick, room)
       stay
 
+    case Event(Server.ResponseRoomCreated(room), ConnectionData) =>
+      log.info(s"Created room: $room received.")
+      client ! chat.ResponseRoomCreated(room)
+      stay
+
+    case Event(Server.ResponseRoomExists(room), ConnectionData) =>
+      log.info(s"Already exists: $room received.")
+      client ! chat.ResponseRoomExists(room)
+      stay
+
     case Event(chat.RequestDeleteRoom(room), ConnectionData) =>
-      log.info(s"Request to delete room $room received.")
+      log.info(s"Request to delete room: $room received.")
       server ! Server.RequestDeleteRoom(nick, room)
+      stay
+
+    case Event(Server.ResponseRoomDeleted(room), ConnectionData) =>
+      log.info(s"Deleted room: $room received.")
+      client ! chat.ResponseRoomDeleted(room)
+      stay
+
+    case Event(Server.ResponseNoPerm(room), ConnectionData) =>
+      log.info(s"No permission to delete room: $room received.")
+      client ! chat.ResponseNoPerm(room)
       stay
   }
 

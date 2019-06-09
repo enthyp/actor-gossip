@@ -1,6 +1,6 @@
 package chat.server
 
-import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.actor.{Actor, ActorLogging, ActorRef, PoisonPill, Props}
 import akka.cluster.pubsub.DistributedPubSub
 import akka.cluster.pubsub.DistributedPubSubMediator.{Publish, Subscribe}
 
@@ -44,9 +44,7 @@ class Server extends Actor with ActorLogging {
   val sessions = new mutable.HashMap[String, ActorRef]()
   val users = new mutable.HashSet[String]()
   val rooms = new mutable.HashMap[String, ActorRef]()
-
-  rooms += ("CoolRoom" -> context.actorOf(Room.props("cool"), "cool_room"))
-  rooms += ("LameRoom" -> context.actorOf(Room.props("lame"), "lame_room"))
+  val admins = new mutable.HashMap[String, String]()
 
   import Server._
 
@@ -93,6 +91,27 @@ class Server extends Actor with ActorLogging {
       } else {
         sender() ! ResponseNoRoom(room)
       }
+
+    case RequestCreateRoom(nick, room) =>
+      if (!rooms.contains(room)) {
+        rooms += (room -> context.actorOf(Room.props(room), s"${room}_room"))
+        admins += (room -> nick)
+        sender() ! ResponseRoomCreated(room)
+      } else
+        sender() ! ResponseRoomExists(room)
+// TODO: broadcast to others!
+    case RequestDeleteRoom(nick, room) =>
+      if (rooms.contains(room)) {
+        if (admins(room) == nick) {
+          val session = rooms(room)
+          rooms -= room
+          admins -= room
+          session ! PoisonPill
+          sender() ! ResponseRoomDeleted(room)
+        } else
+          sender() ! ResponseNoPerm(room)
+      } else
+        sender() ! ResponseNoRoom(room)
 
     case other =>
       log.error(s"Unexpected message: $other")
