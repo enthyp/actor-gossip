@@ -2,27 +2,36 @@ package chat.client
 
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
 import com.typesafe.config.ConfigFactory
-import scalafx.Includes.when
+import scalafx.Includes._
 import scalafx.application.{JFXApp, Platform}
+import scalafx.collections.ObservableBuffer
 import scalafx.geometry.{Insets, Pos}
 import scalafx.scene.Scene
 import scalafx.scene.control._
-import scalafx.scene.layout.{BorderPane, ColumnConstraints, GridPane, HBox}
+import scalafx.scene.input.{KeyCode, KeyEvent}
+import scalafx.scene.layout._
 import scalafx.scene.paint.Color._
+import scalafx.stage.{Modality, Stage}
 
 object UIActor {
   def props: Props = Props(new UIActor)
 
-  sealed trait UIMessage {
-    def header: String = ""
-    def content: String = ""
+  // UI messages
+  sealed trait UIMessage
+  sealed trait Dialogable {
+    def header: String
+    def content: String
   }
-  case class Connect(host: String, port: Int, user: String) extends UIMessage
-  case class Error(reason: String, text: String) extends UIMessage {
+  case class RequestConnect(host: String, port: Int, user: String) extends UIMessage
+  case class ResponseError(reason: String, text: String) extends UIMessage with Dialogable {
     override def header: String = reason
     override def content: String = text
   }
-  case object Connected extends UIMessage
+  case object ResponseConnected extends UIMessage
+
+  case class InputLine(line: String) extends UIMessage
+
+  case object Disconnect extends UIMessage
 }
 
 class UIActor extends Actor with ActorLogging {
@@ -31,8 +40,6 @@ class UIActor extends Actor with ActorLogging {
 
   import UIActor._
 
-  override def preStart(): Unit = log.info("REST")
-
   def receive: Receive = {
     case msg =>
       context.become(initial)
@@ -40,7 +47,7 @@ class UIActor extends Actor with ActorLogging {
   }
 
   def initial: Receive = {
-    case Connect(host, port, user) =>
+    case RequestConnect(host, port, user) =>
       if (clientActor.isEmpty) {
         val serverActorRef =
           context.actorSelection(s"akka.tcp://chat-server-system@$host:$port/user/server")
@@ -49,21 +56,45 @@ class UIActor extends Actor with ActorLogging {
 
       clientActor.get ! Client.InputLineMsg(user)
 
-    case Connected =>
+    case ResponseConnected =>
       context.become(connected)
       Platform.runLater {
         UI.stateMain()
       }
 
-    case msg: Error =>
+    case msg: ResponseError =>
       Platform.runLater {
         UI.connectionFailure(msg)
       }
+
+    case Disconnect =>
+      if (clientActor.isDefined)
+        clientActor.get ! chat.Logout
   }
 
   def connected: Receive = {
-    case _ =>
-      println("blob")
+    case UIActor.InputLine(line) =>
+      clientActor.get ! Client.InputLineMsg(line)
+
+    case Client.ChatRoomsMsg(rooms) =>
+      Platform.runLater {
+        UI.setRooms(rooms)
+      }
+
+    case Client.JoinedMsg(room) =>
+      Platform.runLater {
+        UI.stateConversation(room)
+      }
+
+    case Client.LeftMsg =>
+      Platform.runLater {
+        UI.closeChatWindow()
+      }
+
+    case Client.ChatMsg(line) =>
+      Platform.runLater {
+        UI.addMsg(line)
+      }
   }
 }
 
@@ -71,6 +102,10 @@ object UI extends JFXApp {
 
   val system = ActorSystem("chat-client-system", ConfigFactory.load("client"))
   val uiActor = system.actorOf(UIActor.props, "UI")
+
+  val roomsList: ObservableBuffer[String] = new ObservableBuffer[String]
+  val msgList: ObservableBuffer[String] = new ObservableBuffer[String]
+  var convStage: Option[Stage] = None
 
   stage = new JFXApp.PrimaryStage {
 
@@ -115,7 +150,7 @@ object UI extends JFXApp {
     val connectButton = new Button {
       text = "Connect"
       onAction = _ => {
-        uiActor ! UIActor.Connect(
+        uiActor ! UIActor.RequestConnect(
           hostField.text.value,
           portField.text.value.toInt,
           nickField.text.value
@@ -132,11 +167,11 @@ object UI extends JFXApp {
     inputGrid
   }
 
-  def connectionFailure(error: UIActor.Error): Unit = {
+  def connectionFailure(error: UIActor.ResponseError): Unit = {
     dialog(error).showAndWait()
   }
 
-  def dialog[A <: UIActor.UIMessage](msg: A): Dialog[A] = {
+  def dialog[A <: UIActor.Dialogable](msg: A): Dialog[A] = {
     val dialog = new Dialog[A] {
       title = msg.header
       contentText = msg.content
@@ -146,18 +181,124 @@ object UI extends JFXApp {
   }
 
   def stateMain(): Unit = {
+    stage.setHeight(500)
     stage.getScene.setRoot(mainWindow)
   }
 
   def mainWindow: BorderPane = {
-    new BorderPane()
+    val mainPanel = new BorderPane() {
+
+    }
+
+    val cp = centerPanel
+    cp.margin = Insets(10, 5, 5, 5)
+    mainPanel.setCenter(cp)
+
+    val ip = inputPanel
+    ip.margin = Insets(0, 5, 5, 5)
+    mainPanel.setBottom(ip)
+    mainPanel
+  }
+
+  def centerPanel: StackPane = {
+    val lv = new ListView[String](roomsList)
+    lv.setMouseTransparent(true)
+    lv.setFocusTraversable(false)
+
+    lv.getItems.onChange((_, _) => {
+      lv.setItems(roomsList)
+    })
+
+    val sp = new StackPane {
+      children = lv
+    }
+    sp
+  }
+
+  def inputPanel: TextField = {
+    val input = new TextField {
+      onKeyPressed = (event: KeyEvent) => {
+        if (event.code.equals(KeyCode.Enter)) {
+          uiActor ! UIActor.InputLine(this.text.value)
+          this.text = ""
+        }
+      }
+    }
+
+    input
+  }
+
+  def setRooms(rooms: List[String]): Unit = {
+    roomsList.clear()
+    roomsList.insert(0, rooms :_*)
+  }
+
+  def stateConversation(room: String): Unit = {
+    val newStage = new Stage {
+      scene = new Scene {
+        title.value = room
+        fill = LightGrey
+        root = chatWindow
+
+        onShown = _ => {
+          minWidth = 300
+          minHeight = 400
+        }
+      }
+    }
+
+    convStage = Some(newStage)
+
+    newStage.onCloseRequest = _ => {
+      uiActor ! UIActor.InputLine("\\leave")
+    }
+
+    newStage.initModality(Modality.ApplicationModal)
+    newStage.showAndWait()
   }
 
   def chatWindow: BorderPane = {
-    new BorderPane()
+    val chatPanel = new BorderPane() {
+
+    }
+
+    val cp = convPanel
+    cp.margin = Insets(10, 5, 5, 5)
+    chatPanel.setCenter(cp)
+
+    val ip = inputPanel
+    ip.margin = Insets(0, 5, 5, 5)
+    chatPanel.setBottom(ip)
+    chatPanel
+  }
+
+  def convPanel: StackPane = {
+    val lv = new ListView[String](msgList)
+    lv.setMouseTransparent(true)
+    lv.setFocusTraversable(false)
+
+    lv.getItems.onChange((_, _) => {
+      lv.setItems(msgList)
+    })
+
+    val sp = new StackPane {
+      children = lv
+    }
+    sp
+  }
+
+  def addMsg(msg: String): Unit = {
+    msgList += msg
+  }
+
+  def closeChatWindow(): Unit = {
+    msgList.clear()
+    if (convStage.isDefined)
+      convStage.get.close()
   }
 
   override def stopApp(): Unit = {
+    uiActor ! UIActor.Disconnect
     system.terminate()
   }
 }

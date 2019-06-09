@@ -9,7 +9,7 @@ import chat.server.Room
 
 sealed trait Message
 
-case class RequestLogin(user: String) extends Message
+case class RequestLogin(user: String, ref: ActorRef) extends Message
 case class ResponseLoggedIn(user: String, remoteActor: ActorRef) extends Message
 case class ResponseNameTaken(user: String) extends Message
 

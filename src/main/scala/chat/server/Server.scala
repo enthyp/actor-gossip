@@ -44,20 +44,21 @@ class Server extends Actor with ActorLogging {
   val sessions = new mutable.HashMap[String, ActorRef]()
   val users = new mutable.HashSet[String]()
   val rooms = new mutable.HashMap[String, ActorRef]()
-  rooms += ("bob" -> context.actorOf(Room.props("bob"), "bob_room"))
-  rooms += ("pyp" -> context.actorOf(Room.props("pyp"), "pyp_room"))
+
+  rooms += ("CoolRoom" -> context.actorOf(Room.props("cool"), "cool_room"))
+  rooms += ("LameRoom" -> context.actorOf(Room.props("lame"), "lame_room"))
 
   import Server._
 
   override def receive: Receive = {
 
-    case chat.RequestLogin(user) =>
+    case chat.RequestLogin(user, ref) =>
       log.info(s"Login request as: $user")
 
       if (users.contains(user))
         sender() ! chat.ResponseNameTaken(user)
       else {
-        val newSession = context.actorOf(UserSession.props(user, sender(), self), s"session_$user")
+        val newSession = context.actorOf(UserSession.props(user, ref, self), s"session_$user")
         sessions += (user -> newSession)
         users += user
 

@@ -1,12 +1,6 @@
 package chat.server
 
 import akka.actor.{Actor, ActorLogging, ActorRef, FSM, Props}
-import akka.util.Timeout
-import akka.pattern.ask
-
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.util.{Failure, Success}
 import chat.server.UserSession.{Data, State}
 
 
@@ -31,10 +25,6 @@ class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) 
 
   import UserSession._
 
-  implicit val timeout = Timeout(3 seconds)
-
-  import scala.concurrent.ExecutionContext.Implicits.global
-
   startWith(Connected, ConnectionData)
 
   when(Connected) {
@@ -47,7 +37,7 @@ class UserSession(val nick: String, val client: ActorRef, val server: ActorRef) 
       server ! Server.RequestChatRooms
       stay
 
-    case Event(chat.ResponseChatRooms(roomsList), ConnectionData) =>
+    case Event(Server.ResponseChatRooms(roomsList), ConnectionData) =>
       log.info(s"Chat rooms response received.")
       client ! chat.ResponseChatRooms(roomsList)
       stay

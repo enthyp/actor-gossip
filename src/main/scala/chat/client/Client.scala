@@ -18,6 +18,11 @@ object Client {
   sealed trait ClientMessage
   case class InputLineMsg(line: String) extends ClientMessage
 
+  case class ChatRoomsMsg(rooms: List[String]) extends ClientMessage
+  case class JoinedMsg(room: String) extends ClientMessage
+  case class ChatMsg(line: String) extends ClientMessage
+  case object LeftMsg extends ClientMessage
+
   // client states
   sealed trait State
   case object Connecting extends State
@@ -50,29 +55,29 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
     case Event(InputLineMsg(line), Uninitialized) =>
       if (line.forall(_.isLetter)) {
         implicit val timeout = Timeout(3 seconds)
-        val response = (serverActorRef ? chat.RequestLogin(line)).mapTo[chat.ResponseLoggedIn]
+        val selfRef = self
+        val response = serverActorRef ? chat.RequestLogin(line, self)
 
-        var nextState: Client.State = Connecting
-        var nextData: Client.Data = Uninitialized
         response.onComplete {
-          case Success(chat.ResponseLoggedIn(nick, remoteActor)) =>
-            uiActorRef ! UIActor.Connected
-            nextState = Connected
-            nextData = SessionData(nick, remoteActor)
+          case Success(msg: chat.ResponseLoggedIn) =>
+            self ! msg
+          case Success(chat.ResponseNameTaken(nick)) =>
+            uiActorRef ! UIActor.ResponseError("Nickname taken", s"$nick is taken, choose another one!")
           case Failure(_) =>
-            uiActorRef !UIActor.Error("Connection timeout.", "Failed to connect to server.")
+            uiActorRef !UIActor.ResponseError("Connection timeout.", "Failed to connect to server.")
         }
 
-        goto(nextState) using nextData
+        stay
       }
       else {
-        uiActorRef ! UIActor.Error("Erroneous nickname", "Nickname can contain letters only!")
+        uiActorRef ! UIActor.ResponseError("Erroneous nickname", "Nickname can contain letters only!")
         stay using Uninitialized
       }
 
-    case Event(chat.ResponseNameTaken(nick: String), Uninitialized) =>
-      uiActorRef ! UIActor.Error("Nickname taken", s"$nick is taken, choose another one!")
-      stay using Uninitialized
+    case Event(chat.ResponseLoggedIn(nick, remoteActor), Uninitialized) =>
+      uiActorRef ! UIActor.ResponseConnected
+      goto(Connected) using SessionData(nick, remoteActor)
+
   }
 
   import Parser._
@@ -115,17 +120,20 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
           stay
       }
 
+    case Event(UIActor.Disconnect, SessionData(nick, _)) =>
+      serverActorRef ! chat.Logout(nick)
+      stay
+
     case Event(chat.ResponseJoined(room), SessionData(nick, sessionRef)) =>
-      println(s"Joined $room!")
+      uiActorRef ! Client.JoinedMsg(room)
       goto(Chatting) using ConvData(nick, room, sessionRef)
 
     case Event(chat.ResponseNoRoom(room), _: SessionData) =>
       println(s"No such room: $room!")
       stay
 
-    case Event(chat.ResponseChatRooms(rooms: List[String]), _: SessionData) =>
-      println("CHAT ROOMS:")
-      rooms.foreach(r => println(s"-> $r"))
+    case Event(chat.ResponseChatRooms(rooms), _: SessionData) =>
+      uiActorRef ! Client.ChatRoomsMsg(rooms)
       stay
 
     case Event(chat.ResponseRoomCreated(room: String), _: SessionData) =>
@@ -148,7 +156,7 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
 
     case Event(chat.ResponseLeft(roomVal), ConvData(nick, room, remoteRef)) =>
       if (roomVal == room) {
-        println(s"Left $room.")
+        uiActorRef ! Client.LeftMsg
         goto(Connected) using SessionData(nick, remoteRef)
       } else {
         stay
