@@ -22,6 +22,7 @@ object Client {
   case class JoinedMsg(room: String) extends ClientMessage
   case class ChatMsg(line: String) extends ClientMessage
   case object LeftMsg extends ClientMessage
+  case object LoggedOutMsg extends ClientMessage
 
   // client states
   sealed trait State
@@ -55,7 +56,6 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
     case Event(InputLineMsg(line), Uninitialized) =>
       if (line.forall(_.isLetter)) {
         implicit val timeout = Timeout(3 seconds)
-        val selfRef = self
         val response = serverActorRef ? chat.RequestLogin(line, self)
 
         response.onComplete {
@@ -102,21 +102,23 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
                 stay
               case LogoutCmd =>
                 serverActorRef ! chat.Logout(nick)
+                sender() ! LoggedOutMsg
                 goto(Connecting) using Uninitialized
               case UnknownCmd(command) =>
-                println(s"Unknown command: $command")
+                uiActorRef ! UIActor.ResponseError("Error", s"Unknown command: $command")
+                println()
                 stay
               case _ =>
-                println(s"Command $cmd is not supported in this state.")
+                uiActorRef ! UIActor.ResponseError("Error", s"Command $cmd is not supported in this state.")
                 stay
             }
           case Right(_) =>
-            println("Only commands are supported in this state.")
+            uiActorRef ! UIActor.ResponseError("Error", "Only commands are supported in this state.")
             stay
         }
       } catch {
         case ParsingError(message, _) =>
-          println(s"Parsing error occurred: $message")
+          uiActorRef ! UIActor.ResponseError("Error", s"Parsing error occurred: $message")
           stay
       }
 
@@ -129,7 +131,7 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
       goto(Chatting) using ConvData(nick, room, sessionRef)
 
     case Event(chat.ResponseNoRoom(room), _: SessionData) =>
-      println(s"No such room: $room!")
+      uiActorRef ! UIActor.ResponseError("Info", s"No such room: $room!")
       stay
 
     case Event(chat.ResponseChatRooms(rooms), _: SessionData) =>
@@ -137,21 +139,22 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
       stay
 
     case Event(chat.ResponseRoomCreated(room: String), _: SessionData) =>
-      println(s"Chat room $room created!")
+      uiActorRef ! UIActor.ResponseError("Info", s"Chat room $room created!")
       stay
 
     case Event(chat.ResponseRoomDeleted(room: String), _: SessionData) =>
-      println(s"Chat room $room deleted!")
+      uiActorRef ! UIActor.ResponseError("Info", s"Chat room $room deleted!")
       stay
   }
 
   when(Chatting) {
     case Event(chat.ChatMessage(from, msg), _: ConvData) =>
-      println(s">>> $from: $msg")
+      uiActorRef ! Client.ChatMsg(s">>> $from: $msg")
       stay
 
     case Event(chat.ResponseChatHistory(history), _: ConvData) =>
-      history.map({case chat.ChatMessage(from, msg) => s">>> $from: $msg"}).foreach(println)
+      history.map({case chat.ChatMessage(from, msg) => s">>> $from: $msg"})
+        .foreach(msg => uiActorRef ! Client.ChatMsg(msg))
       stay
 
     case Event(chat.ResponseLeft(roomVal), ConvData(nick, room, remoteRef)) =>
@@ -168,13 +171,16 @@ class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
           case Left(cmd) =>
             cmd match {
               case LeaveCmd => remoteRef ! chat.RequestLeave
-              case UnknownCmd(command) => println(s"Unknown command: $command")
-              case _ => println(s"Command $cmd is not supported in this state.")
+              case UnknownCmd(command) =>
+                uiActorRef ! UIActor.ResponseError("Error", s"Unknown command: $command")
+              case _ =>
+                uiActorRef ! UIActor.ResponseError("Error", s"Command $cmd is not supported in this state.")
             }
           case Right(msg) => remoteRef ! chat.ChatMessage(nick, msg)
         }
       } catch {
-        case ParsingError(message, _) => println(s"Parsing error occurred: $message")
+        case ParsingError(message, _) =>
+          uiActorRef ! UIActor.ResponseError("Error", s"Parsing error occurred: $message")
       }
 
       stay

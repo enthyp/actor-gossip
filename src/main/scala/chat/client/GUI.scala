@@ -11,7 +11,7 @@ import scalafx.scene.control._
 import scalafx.scene.input.{KeyCode, KeyEvent}
 import scalafx.scene.layout._
 import scalafx.scene.paint.Color._
-import scalafx.stage.{Modality, Stage}
+import scalafx.stage.{Modality, Stage, WindowEvent}
 
 object UIActor {
   def props: Props = Props(new UIActor)
@@ -95,6 +95,16 @@ class UIActor extends Actor with ActorLogging {
       Platform.runLater {
         UI.addMsg(line)
       }
+
+    case Client.LoggedOutMsg =>
+      Platform.runLater {
+        UI.logout()
+      }
+
+    case msg: ResponseError =>
+      Platform.runLater {
+        UI.connectionFailure(msg)
+      }
   }
 }
 
@@ -108,9 +118,9 @@ object UI extends JFXApp {
   var convStage: Option[Stage] = None
 
   stage = new JFXApp.PrimaryStage {
+    title.value = "Server choice"
 
     scene = new Scene {
-      title.value = "Server choice"
       fill = LightGrey
       root = connectWindow
 
@@ -183,6 +193,7 @@ object UI extends JFXApp {
   def stateMain(): Unit = {
     stage.setHeight(500)
     stage.getScene.setRoot(mainWindow)
+    stage.title = "Chat"
   }
 
   def mainWindow: BorderPane = {
@@ -208,6 +219,22 @@ object UI extends JFXApp {
     lv.getItems.onChange((_, _) => {
       lv.setItems(roomsList)
     })
+
+    lv.cellFactory = (l: ListView[String]) => {
+      val cell = new ListCell[String]()
+      cell.item.onChange { (_, _, str) =>
+        cell.text = str
+        cell.setMouseTransparent(true)
+        cell.setFocusTraversable(false)
+        cell.setWrapText(true)
+        cell.prefWidth = 50
+      }
+      cell
+    }
+
+    lv.placeholder = new ListView[String](
+      new ObservableBuffer[String] ++= List("No rooms loaded.")
+    )
 
     val sp = new StackPane {
       children = lv
@@ -274,12 +301,22 @@ object UI extends JFXApp {
 
   def convPanel: StackPane = {
     val lv = new ListView[String](msgList)
-    lv.setMouseTransparent(true)
-    lv.setFocusTraversable(false)
 
     lv.getItems.onChange((_, _) => {
       lv.setItems(msgList)
     })
+
+    lv.cellFactory = (l: ListView[String]) => {
+      val cell = new ListCell[String]()
+      cell.item.onChange { (_, _, str) =>
+        cell.text = str
+        cell.setMouseTransparent(true)
+        cell.setFocusTraversable(false)
+        cell.setWrapText(true)
+        cell.prefWidth = 50
+      }
+      cell
+    }
 
     val sp = new StackPane {
       children = lv
@@ -297,8 +334,26 @@ object UI extends JFXApp {
       convStage.get.close()
   }
 
+  def logout(): Unit = {
+    stage.fireEvent(new WindowEvent(stage, WindowEvent.WindowCloseRequest))
+  }
+
   override def stopApp(): Unit = {
     uiActor ! UIActor.Disconnect
     system.terminate()
+  }
+}
+
+class DeadCell extends ListCell[String] {
+  private val label = new Label()
+  private val pane: StackPane = new StackPane()
+  pane.minWidth = 0
+  pane.prefWidth = 1
+  pane.children += label
+
+  this.item.onChange { (_, _, str) =>
+    this.text = str
+    this.setMouseTransparent(true)
+    this.setFocusTraversable(false)
   }
 }
