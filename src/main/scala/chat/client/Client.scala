@@ -1,17 +1,22 @@
 package chat.client
 
+import akka.pattern.ask
 import akka.actor.{Actor, ActorLogging, ActorRef, ActorSelection, FSM, PoisonPill, Props}
+import akka.util.Timeout
 import chat.RequestCreateRoom
 import chat.client.Client.{Data, State}
 
+import scala.util.{Failure, Success}
+import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
 
 object Client {
-  def props(serverActorRef: ActorSelection): Props =
-    Props(new Client(serverActorRef))
+  def props(uiActorRef: ActorRef, serverActorRef: ActorSelection): Props =
+    Props(new Client(uiActorRef, serverActorRef))
 
-  // client internal messages
+  // client side messages
   sealed trait ClientMessage
-  final case class InputLineMsg(line: String) extends ClientMessage
+  case class InputLineMsg(line: String) extends ClientMessage
 
   // client states
   sealed trait State
@@ -26,7 +31,7 @@ object Client {
   case class ConvData(nick: String, room: String, roomRef: ActorRef) extends Data
 }
 
-class Client(serverActorRef: ActorSelection) extends Actor
+class Client(uiActorRef: ActorRef, serverActorRef: ActorSelection) extends Actor
   with ActorLogging
   with FSM[State, Data] {
   import Client._
@@ -35,32 +40,38 @@ class Client(serverActorRef: ActorSelection) extends Actor
     stateData match {
       case SessionData(nick, _) => serverActorRef ! chat.Logout(nick)
       case ConvData(nick, _, _) => serverActorRef ! chat.Logout(nick)
+      case Uninitialized =>
     }
   }
 
   startWith(Connecting, Uninitialized)
 
-  onTransition {
-    case Connected -> Connecting =>
-      println("Logged out.")
-    case _ -> Connecting =>
-      println("Choose login: ")
-  }
-
   when (Connecting) {
     case Event(InputLineMsg(line), Uninitialized) =>
-      if (line.forall(_.isLetter))
-        serverActorRef ! chat.RequestLogin(line)
-      else
-        println("Nickname can contain letters only!")
-      stay using Uninitialized
+      if (line.forall(_.isLetter)) {
+        implicit val timeout = Timeout(3 seconds)
+        val response = (serverActorRef ? chat.RequestLogin(line)).mapTo[chat.ResponseLoggedIn]
 
-    case Event(chat.ResponseLoggedIn(nick, remoteActor), Uninitialized) =>
-      println("Logged in.")
-      goto(Connected) using SessionData(nick, remoteActor)
+        var nextState: Client.State = Connecting
+        var nextData: Client.Data = Uninitialized
+        response.onComplete {
+          case Success(chat.ResponseLoggedIn(nick, remoteActor)) =>
+            uiActorRef ! UIActor.Connected
+            nextState = Connected
+            nextData = SessionData(nick, remoteActor)
+          case Failure(_) =>
+            uiActorRef !UIActor.Error("Connection timeout.", "Failed to connect to server.")
+        }
+
+        goto(nextState) using nextData
+      }
+      else {
+        uiActorRef ! UIActor.Error("Erroneous nickname", "Nickname can contain letters only!")
+        stay using Uninitialized
+      }
 
     case Event(chat.ResponseNameTaken(nick: String), Uninitialized) =>
-      println(s"$nick is taken, choose another one!")
+      uiActorRef ! UIActor.Error("Nickname taken", s"$nick is taken, choose another one!")
       stay using Uninitialized
   }
 
@@ -149,7 +160,7 @@ class Client(serverActorRef: ActorSelection) extends Actor
           case Left(cmd) =>
             cmd match {
               case LeaveCmd => remoteRef ! chat.RequestLeave
-              case UnknownCmd => println(s"Unknown command: $cmd")
+              case UnknownCmd(command) => println(s"Unknown command: $command")
               case _ => println(s"Command $cmd is not supported in this state.")
             }
           case Right(msg) => remoteRef ! chat.ChatMessage(nick, msg)

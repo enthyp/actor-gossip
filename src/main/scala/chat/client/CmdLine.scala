@@ -1,10 +1,20 @@
 package chat.client
 
-import akka.actor.{ActorSystem, PoisonPill}
+import akka.actor.{Actor, ActorSystem, PoisonPill, Props}
 import com.typesafe.config.ConfigFactory
 
+object UIAActor {
+  def props: Props = Props(new UIActor)
+}
 
-object Main {
+class UIAActor extends Actor {
+  override def receive: Receive = {
+    case _ =>
+  }
+}
+
+
+object CmdLine {
   def main(args: Array[String]): Unit = {
 
     val usage =
@@ -15,7 +25,7 @@ object Main {
       """.stripMargin
 
     var clientHost = "127.0.0.1"
-    var clientPort = 2553
+    var clientPort = 0
     var serverHost = clientHost
     var serverPort = 2551
 
@@ -70,7 +80,8 @@ object Main {
     val serverActorRef =
       system.actorSelection(s"akka.tcp://chat-server-system@$serverHost:$serverPort/user/server")
 
-    val clientActorRef = system.actorOf(Client.props(serverActorRef), "client")
+    val uiActor = system.actorOf(UIAActor.props, "UI")
+    val clientActorRef = system.actorOf(Client.props(uiActor, serverActorRef), "client")
 
     var running = true
     while (running) {

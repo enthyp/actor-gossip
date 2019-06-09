@@ -50,6 +50,7 @@ class Server extends Actor with ActorLogging {
   import Server._
 
   override def receive: Receive = {
+
     case chat.RequestLogin(user) =>
       log.info(s"Login request as: $user")
 
