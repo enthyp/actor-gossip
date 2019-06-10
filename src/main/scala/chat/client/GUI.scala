@@ -1,6 +1,6 @@
 package chat.client
 
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, PoisonPill, Props}
 import com.typesafe.config.ConfigFactory
 import scalafx.Includes._
 import scalafx.application.{JFXApp, Platform}
@@ -48,12 +48,13 @@ class UIActor extends Actor with ActorLogging {
 
   def initial: Receive = {
     case RequestConnect(host, port, user) =>
-      if (clientActor.isEmpty) {
-        val serverActorRef =
-          context.actorSelection(s"akka.tcp://chat-server-system@$host:$port/user/server")
-        clientActor = Some(context.actorOf(Client.props(self, serverActorRef), "client"))
+      val serverActorRef =
+        context.actorSelection(s"akka.tcp://chat-server-system@$host:$port/user/server")
+      if (clientActor.isDefined) {
+        context.stop(clientActor.get)
       }
 
+      clientActor = Some(context.actorOf(Client.props(self, serverActorRef), s"client_$host:$port"))
       clientActor.get ! Client.InputLineMsg(user)
 
     case ResponseConnected =>
