@@ -15,10 +15,11 @@ object Server {
   case object RequestChatRooms extends ServerMessage
   case class ResponseChatRooms(rooms: List[String]) extends ServerMessage
 
-  case class UserLoggedIn(user: String) extends ServerMessage
-  case class Logout(user: String) extends ServerMessage
+  case class BroadcastUserLoggedIn(user: String) extends ServerMessage
+  case class BroadcastUserLoggedOut(user: String) extends ServerMessage
+  case class BroadcastRoomCreated(admin: String, room: String) extends ServerMessage
+  case class BroadcastRoomDeleted(room: String) extends ServerMessage
   case object ShutdownSession extends ServerMessage
-  case class UserLoggedOut(user: String) extends ServerMessage
 
   case class RequestJoin(user: String, room: String) extends ServerMessage
   case class ResponseJoined(room: String, roomRef: ActorRef) extends ServerMessage
@@ -61,10 +62,10 @@ class Server extends Actor with ActorLogging {
         users += user
 
         sender() ! chat.ResponseLoggedIn(user, newSession)
-        mediator ! Publish(serverTopic, UserLoggedIn(user))
+        mediator ! Publish(serverTopic, BroadcastUserLoggedIn(user))
       }
 
-    case UserLoggedIn(user) =>
+    case BroadcastUserLoggedIn(user) =>
       log.info(s"Login broadcast for: $user")
       users += user
 
@@ -73,9 +74,9 @@ class Server extends Actor with ActorLogging {
       val session = sessions remove user
       if (session.isDefined) session.get ! ShutdownSession
       users -= user
-      mediator ! Publish(serverTopic, UserLoggedOut(user))
+      mediator ! Publish(serverTopic, BroadcastUserLoggedOut(user))
 
-    case UserLoggedOut(user) =>
+    case BroadcastUserLoggedOut(user) =>
       log.info(s"Logout broadcast for: $user")
       users -= user
 
@@ -97,9 +98,17 @@ class Server extends Actor with ActorLogging {
         rooms += (room -> context.actorOf(Room.props(room), s"${room}_room"))
         admins += (room -> nick)
         sender() ! ResponseRoomCreated(room)
+        mediator ! Publish(serverTopic, BroadcastRoomCreated(nick, room))
       } else
         sender() ! ResponseRoomExists(room)
-// TODO: broadcast to others!
+
+    case BroadcastRoomCreated(admin, room) =>
+      log.info(s"Room created broadcast for: $room")
+      if (!rooms.contains(room)) {
+        rooms += (room -> context.actorOf(Room.props(room), s"${room}_room"))
+        admins(room) = admin
+      }
+
     case RequestDeleteRoom(nick, room) =>
       if (rooms.contains(room)) {
         if (admins(room) == nick) {
@@ -108,10 +117,20 @@ class Server extends Actor with ActorLogging {
           admins -= room
           session ! PoisonPill
           sender() ! ResponseRoomDeleted(room)
+          mediator ! Publish(serverTopic, BroadcastRoomDeleted(room))
         } else
           sender() ! ResponseNoPerm(room)
       } else
         sender() ! ResponseNoRoom(room)
+
+    case BroadcastRoomDeleted(room) =>
+      log.info(s"Room deleted broadcast for: $room")
+      if (rooms.contains(room)) {
+        val session = rooms(room)
+        rooms -= room
+        admins -= room
+        session ! PoisonPill
+      }
 
     case other =>
       log.error(s"Unexpected message: $other")
