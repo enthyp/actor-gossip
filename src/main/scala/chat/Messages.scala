@@ -36,3 +36,5 @@ case class ResponseChatHistory(history: List[ChatMessage]) extends Message
 case class ChatMessage(from: String, msg: String) extends Message with Room.PublishableMessage
 case object RequestLeave extends Message
 case class ResponseLeft(room: String) extends Message
+
+class InMessage(val from: String, val text: String)
