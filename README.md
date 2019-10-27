@@ -1,2 +1,2 @@
 # actor-gossip
-Simple distributed chat server built on Akka Clustering. A client with GUI included.
+Simple distributed chat server built with Akka Clustering. A client with GUI included.
