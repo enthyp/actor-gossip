@@ -1,2 +1,2 @@
-# Spy-chat
-Akka-based chat server with online message analysis on Spark.
+# Actor-gossip
+Simple distributed chat server built on Akka Clustering. A client with GUI included.
